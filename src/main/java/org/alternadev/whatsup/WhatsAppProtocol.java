@@ -5,34 +5,34 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class BinTreeNodeReader {
+public class WhatsAppProtocol {
 
+    private static final int MAX_BUFFER_LENG = 5 * 1024;
     private String[] dic;
-    private int[] input;
+    private byte[] input = new byte[MAX_BUFFER_LENG];
+    private int leng = 0;
+    private int readPos = 0;
 
-    public BinTreeNodeReader(String[] dic) {
+    public WhatsAppProtocol(String[] dic) {
         this.dic = dic;
     }
-
-    public ProtocolNode nextTree() throws InvalidTokenException,
-            IncompleteMessageException {
-        return nextTree(null);
+    public void addData(byte[] data, int leng)
+    {
+        for(int i = 0; i < leng; i++)
+        {
+            input[i+this.leng] = data[i];
+        }
+        this.leng += leng;
     }
-
-    public ProtocolNode nextTree(int[] input) throws InvalidTokenException,
-            IncompleteMessageException {
-        if (input != null) {
-            this.input = input;
+    public ProtocolNode nextTree() throws InvalidTokenException {
+        int playloadSize = this.readInt16();
+        
+        if(playloadSize > leng)
+        {
+            readPos =0;
+            return null;
         }
-        int stanzaSize = this.peekInt16();
-        if (stanzaSize > this.input.length) {
-            throw new IncompleteMessageException(
-                    ("Die Message war mal so mäßig incomplete et ita. ("
-                    + stanzaSize + ", " + this.input.length + ")"),
-                    this.input);
-        }
-        this.readInt16();
-        if (stanzaSize > 0) {
+        if (playloadSize > 0) {
             return this.nextTreeInternal();
         }
         return null;
@@ -44,7 +44,10 @@ public class BinTreeNodeReader {
         }
         throw new InvalidTokenException(token);
     }
-
+    private byte readByte()
+    {
+        return input[readPos++];
+    }
     protected String readString(int token) throws InvalidTokenException {
         String ret = "";
         if (token == -1) {
@@ -58,13 +61,13 @@ public class BinTreeNodeReader {
             ret = "";
         } else if (token == 0xfc) {
             int size = this.readInt8();
-            ret = this.fillArray(size);
+            ret = this.getString(size);
         } else if (token == 0xfd) {
             int size = this.readInt24();
-            ret = this.fillArray(size);
+            ret = this.getString(size);
         } else if (token == 0xfe) {
             int size = this.readInt8();
-            ret = this.fillArray(size + 0xf5);
+            ret = this.getString(size + 0xf5);
         } else if (token == 0xfa) {
             String user = this.readString(this.readInt8());
             String server = this.readString(this.readInt8());
@@ -104,13 +107,18 @@ public class BinTreeNodeReader {
         String tag = this.readString(token);
         Map<String, String> attributes = this.readAttributes(size);
         if (size % 2 == 1) {
+            removeReaded();
             return new ProtocolNode(tag, attributes, null, "");
         }
         token = this.readInt8();
         if (this.isListTag(token)) {
-            return new ProtocolNode(tag, attributes, this.readList(token), "");
+            List<ProtocolNode> list = this.readList(token);
+            removeReaded();
+            return new ProtocolNode(tag, attributes, list, "");
         }
-        return new ProtocolNode(tag, attributes, null, this.readString(token));
+        String data = this.readString(token);
+        removeReaded();
+        return new ProtocolNode(tag, attributes, null, data);
     }
 
     protected boolean isListTag(int token) {
@@ -143,28 +151,26 @@ public class BinTreeNodeReader {
     protected int readInt24() {
         int ret = 0;
         if (this.input.length >= 3) {
-            ret = input[0] << 16;
-            ret += input[1] << 8;
-            ret += input[2] << 0;
-
-            removeFromInput(3);
+            ret = (readByte() & 0xFF) << 16;
+            ret += (readByte() & 0xFF) << 8;
+            ret += (readByte() & 0xFF);
         }
         return ret;
     }
 
-    private void removeFromInput(int num) {
-        int[] karl = new int[input.length - num];
-        for (int i = num; i < input.length; i++) {
-            karl[i - num] = input[i];
+    private void removeReaded() {
+        for (int i = readPos; i < leng; i++) {
+            input[i - readPos] = input[i];
         }
-        input = karl;
+        leng = leng - readPos;
+        readPos = 0;    
     }
 
     protected int peekInt16() {
         int ret = 0;
-        if (this.input.length >= 2) {
-            ret = input[0] << 8;
-            ret += input[1] << 0;
+        if (leng >= 2) {
+            ret = (input[readPos] << 8) & 0xFF;
+            ret ^= input[readPos+1] & 0xFF;
         }
 
         return ret;
@@ -173,35 +179,31 @@ public class BinTreeNodeReader {
     protected int readInt16() {
         int ret = peekInt16();
         if (ret > 0) {
-            removeFromInput(2);
+            readPos+=2;
         }
         return ret;
     }
 
     protected int readInt8() {
         int ret = 0;
-        if (this.input.length >= 1) {
-            ret = input[0];
-            removeFromInput(1);
+        if (leng >= 1) {
+            ret = readByte() & 0xFF;
         }
 
         return ret;
     }
 
-    protected String fillArray(int len) {
+    protected String getString(int len) {
         String ret = "";
-        if (this.input.length >= len) {
-            ret = new String(intToCharArray(input)).substring(0, len);
-            removeFromInput(len);
+        byte[] arr = new byte[len];
+        if(leng >= len)
+        {
+            for(int i = 0; i < len;i++)
+            {
+                arr[i] = readByte();
+            }
+            ret = new String(arr);
         }
         return ret;
-    }
-
-    private char[] intToCharArray(int[] in) {
-        char[] peda = new char[in.length];
-        for (int i = 0; i < in.length; i++) {
-            peda[i] = (char) (((char) in[i]));
-        }
-        return peda;
     }
 }

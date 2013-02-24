@@ -14,22 +14,19 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.alternadev.whatsup.handler.IWhatsUp;
 
-public class WhatsAPI {
+public class WhatsAPI implements Runnable {
 
     private String phoneNumber;
     private String imei;
     private String name;
-    private String whatsAppHost = "bin-short.whatsapp.net";
-    private String whatsAppServer = "s.whatsapp.net";
-    private String whatsAppRealm = "s.whatsapp.net";
-    private String whatsAppDigest = "xmpp/s.whatsapp.net";
-    private String device = "iPhone";
-    private String whatsAppVer = "2.8.2";
     private int port = 5222;
     // private int timeoutSec = 2;
     // private int timeoutUsec = 0;
-    private int[] incompleteMessage;
+    private byte[] incompleteMessage;
     private String disconnectedStatus = "disconnected";
     private String connectedStatus = "connected";
     private String loginStatus = disconnectedStatus;
@@ -41,16 +38,17 @@ public class WhatsAPI {
     ;
 
 	private Socket socket;
-    private BinTreeNodeReader reader;
+    private WhatsAppProtocol reader;
     private BinTreeNodeWriter writer;
+    private IWhatsUp handler;
+    private Thread listen_thread;
+    private boolean connected = false;
 
-    public WhatsAPI(String number, String imei, String name) {
+    public WhatsAPI(IWhatsUp handler) {
         Decode.init();
-        reader = new BinTreeNodeReader(Decode.getDictionary());
+        reader = new WhatsAppProtocol(Decode.getDictionary());
         writer = new BinTreeNodeWriter(Decode.getDictionary());
-        this.phoneNumber = number;
-        this.imei = imei;
-        this.name = name;
+        this.handler = handler;
     }
 
     protected ProtocolNode addFeatures() {
@@ -64,7 +62,7 @@ public class WhatsAPI {
 
     protected ProtocolNode addAuth() {
         Map<String, String> auth = new HashMap<String, String>();
-        auth.put("mechanism", "DIGEST-MD5-1");
+        auth.put("mechanism", "WAUTH-1");
 
         auth.put("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
         return new ProtocolNode("auth", auth, null, "");
@@ -110,7 +108,7 @@ public class WhatsAPI {
 
         String data1 = this.phoneNumber;
         data1 += ":";
-        data1 += this.whatsAppServer;
+        data1 += Constants.WHATSAPP_SERVER;
         data1 += ":";
         data1 += this.encryptPassword();
 
@@ -121,7 +119,7 @@ public class WhatsAPI {
         data2 += cnonce;
 
         String data3 = "AUTHENTICATE:";
-        data3 += this.whatsAppDigest;
+        data3 += Constants.WHATSAPP_DIGEST;
 
         String data4 = md5(data2);
         data4 += ":";
@@ -139,11 +137,16 @@ public class WhatsAPI {
 
         String response = String
                 .format("username=\"%s\",realm=\"%s\",nonce=\"%s\",cnonce=\"%s\",nc=%s,qop=%s,digest-uri=\"%s\",response=%s,charset=utf-8",
-                this.phoneNumber, this.whatsAppRealm, nonce, cnonce,
-                NC, qop, this.whatsAppDigest, data5);
+                this.phoneNumber, Constants.WHATSAPP_REALM, nonce, cnonce,
+                NC, qop, Constants.WHATSAPP_DIGEST, data5);
         return response;
     }
-
+    //TODO: 
+    protected String getResponse(String host, String query)
+    {
+        return "";
+    }
+    
     protected ProtocolNode addAuthResponse() {
         String nonce = this.challenge.get("nonce");
         String resp = this.authenticate(nonce);
@@ -172,29 +175,19 @@ public class WhatsAPI {
         sendData(this.writer.write(node));
     }
 
-    protected int[] readData() {
+    protected int readData(byte[] buffer, int leng) {
         try {
             // BufferedReader in = new BufferedReader(new InputStreamReader(
             // socket.getInputStream()));
-            byte[] input = new byte[1024];
-            socket.getInputStream().read(input);
-            int[] ret = new int[input.length];
-            for (int i = 0; i < input.length; i++) {
-                ret[i] = unsignedToBytes(input[i]);
-            }
-            return ret;
+            int read = socket.getInputStream().read(buffer, 0, leng);
+            return read;
             // ret += new String(input);
         } catch (IOException e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
         }
 
-        return null;
-    }
-
-    public static int unsignedToBytes(byte a) {
-        int b = ((a & 0xFF));
-        return ((b));
+        return -1;
     }
 
     protected void processChallenge(ProtocolNode node) {
@@ -228,74 +221,38 @@ public class WhatsAPI {
         }
     }
 
-    protected void processInboundData(int[] data) {
-        try {
-            ProtocolNode node = reader.nextTree(data);
-            // if(node != null) System.out.println(node != null);
-            while (node != null) {
-                System.out.println(node.nodeString("rx  "));
-                if (node.tag.equals("challenge")) {
-                    this.processChallenge(node);
-                } else if (node.tag.equals("success")) {
-                    this.loginStatus = this.connectedStatus;
-                    this.accountInfo = new HashMap<String, String>();
-                    accountInfo.put("status", node.getAttribute("status"));
-                    accountInfo.put("kind", node.getAttribute("kind"));
-                    accountInfo.put("creation", node.getAttribute("creation"));
-                    accountInfo.put("expiration",
-                            node.getAttribute("expiration"));
-                }
-                if (node.tag.equals("message")) {
-                    messageQueue.add(node);
-                    sendMessageReceived(node);
-                }
-                if (node.tag.equals("iq")
-                        && node.attributeHash.get("type").equals("get")
-                        && node.children.get(0).tag.equals("ping")) {
-                    this.pong(node.attributeHash.get("id"));
-                }
-
-                node = this.reader.nextTree();
-            }
-        } catch (IncompleteMessageException e) {
-            this.incompleteMessage = e.getData();
-            e.printStackTrace();
-        } catch (InvalidTokenException e) {
-            e.printStackTrace();
-        }
-
-    }
-
     public Map<String, String> accountInfo() {
         return this.accountInfo;
     }
 
-    public void connect() throws UnknownHostException, IOException {
-        socket = new Socket(this.whatsAppHost, this.port);
+    public boolean connect() {
+        try {
+            socket = new Socket(Constants.WHATSAPP_HOST, this.port);
+            connected = true;
+            this.listen_thread = new Thread(this);
+            this.listen_thread.start();
+            return true;
+        } catch (UnknownHostException ex) {
+            Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (IOException ex) {
+            Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return false;
     }
 
-    public void login() {
-        String res = this.device + "-" + this.whatsAppVer + "-" + this.port;
-        String data = this.writer.startStream(this.whatsAppServer, res);
+    public void login(String number, String imei, String name) {
+        this.phoneNumber = number;
+        this.imei = imei;
+        this.name = name;
+        String res = Constants.WHATSAPP_DEVICE + "-" + Constants.WHATSAPP_VERSION + "-" + this.port;
+        String data = this.writer.startStream(Constants.WHATSAPP_SERVER, res);
         ProtocolNode feat = this.addFeatures();
         ProtocolNode auth = this.addAuth();
         this.sendData(data);
         this.sendNode(feat);
         this.sendNode(auth);
-        int[] s = this.readData();
 
-        this.processInboundData(s);
-        ProtocolNode data2 = this.addAuthResponse();
-        this.sendNode(data2);
-        int i = 0;
-        do {
-            this.processInboundData(this.readData());
-        } while ((i++ < 100)
-                && this.loginStatus.equals(this.disconnectedStatus));
-    }
 
-    public void pollMessages() {
-        this.processInboundData(this.readData());
     }
 
     public List<ProtocolNode> getMessages() {
@@ -303,7 +260,6 @@ public class WhatsAPI {
         ret.addAll(this.messageQueue);
         this.messageQueue.clear();
         return ret;
-
     }
 
     protected void sendMessageNode(String msgid, String to, ProtocolNode node) {
@@ -316,7 +272,7 @@ public class WhatsAPI {
         ProtocolNode xNode = new ProtocolNode("x", xHash, nodes, "");
 
         Map<String, String> msgHash = new HashMap<String, String>();
-        msgHash.put("to", to + "@" + this.whatsAppServer);
+        msgHash.put("to", to + "@" + Constants.WHATSAPP_SERVER);
         msgHash.put("type", "chat");
         msgHash.put("id", msgid);
         List<ProtocolNode> list = new ArrayList<ProtocolNode>();
@@ -347,7 +303,7 @@ public class WhatsAPI {
 
     public void pong(String msgid) {
         Map<String, String> map = new HashMap<String, String>();
-        map.put("to", this.whatsAppServer);
+        map.put("to", Constants.WHATSAPP_SERVER);
         map.put("id", msgid);
         map.put("type", "result");
         this.sendNode(new ProtocolNode("iq", map, null, ""));
@@ -356,5 +312,70 @@ public class WhatsAPI {
     private String randomUUID() {
         UUID karl = UUID.randomUUID();
         return karl.toString();
+    }
+
+    public void run() {
+        //Listen for incoming messages
+        int buff_leng = 1024;
+        byte[] buffer = new byte[buff_leng];
+        int read_leng = 0;
+        while (this.connected) {
+            if ((read_leng = this.readData(buffer, buff_leng)) > -1) {
+                processData(buffer, read_leng);
+            } else {
+                //Connection Error!
+                break;
+            }
+        }
+        if (handler != null) {
+            handler.onDisconect(this);
+        }
+        connected = false;
+    }
+
+    private void processData(byte[] data, int leng) {
+        reader.addData(data, leng);
+        processData();
+    }
+
+    private void processData() {
+        try {
+            ProtocolNode node;;
+            // if(node != null) System.out.println(node != null);
+            while ((node = reader.nextTree()) != null) {
+                System.out.println(node.nodeString("rx  "));
+                if (node.tag.equals("challenge")) {
+                    this.processChallenge(node);
+                    ProtocolNode data2 = this.addAuthResponse();
+                    this.sendNode(data2);
+                } else if (node.tag.equals("success")) {
+                    this.loginStatus = this.connectedStatus;
+                    this.accountInfo = new HashMap<String, String>();
+                    accountInfo.put("status", node.getAttribute("status"));
+                    accountInfo.put("kind", node.getAttribute("kind"));
+                    accountInfo.put("creation", node.getAttribute("creation"));
+                    accountInfo.put("expiration",
+                            node.getAttribute("expiration"));
+                    if (handler != null) {
+                        handler.onLogin(this, accountInfo);
+                    }
+                }
+                if (node.tag.equals("message")) {
+                    messageQueue.add(node);
+                    sendMessageReceived(node);
+                    if (handler != null) {
+                        handler.onMessageReceived(this, node);
+                    }
+                }
+                if (node.tag.equals("iq")
+                        && node.attributeHash.get("type").equals("get")
+                        && node.children.get(0).tag.equals("ping")) {
+                    this.pong(node.attributeHash.get("id"));
+                }
+            }
+
+        } catch (InvalidTokenException e) {
+            e.printStackTrace();
+        }
     }
 }

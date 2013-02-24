@@ -6,6 +6,7 @@ import java.util.Map;
 public class BinTreeNodeWriter {
 
     private String output = "";
+    private String key = "";
     private Map<String, Integer> tokenMap;
 
     public BinTreeNodeWriter(String[] dic) {
@@ -19,21 +20,24 @@ public class BinTreeNodeWriter {
         }
     }
 
+    public void setKey(String key) {
+        this.key = key;
+    }
+    
+
     public String startStream(String domain, String resource) {
         Map<String, String> attributes = new HashMap<String, String>();
         output = "WA";
-        output += "\u0001\u0001\u0000\u0019";
+        writeInt8(1);
+        writeInt8(2);
 
         attributes.put("to", domain);
         attributes.put("resource", resource);
         this.writeListStart(attributes.size() * 2 + 1);
 
-        this.output += "\u0001";
+        writeInt8(1);
         this.writeAttributes(attributes);
-        String ret = this.output;
-        this.output = "";
-
-        return ret;
+        return flushBuffer();
 
     }
 
@@ -72,6 +76,10 @@ public class BinTreeNodeWriter {
     }
 
     private String flushBuffer() {
+       // String data = (key.equals(""))?output:
+        
+        
+        
         int size = this.output.length();
         String ret = this.writeInt16(size);
         ret += output;
@@ -98,7 +106,7 @@ public class BinTreeNodeWriter {
     }
 
     private void writeInt8(int v) {
-        this.output += (char) (v);
+        this.output += (char) (v & 0xFF);
     }
 
     private String writeInt16(int v) {
@@ -143,7 +151,7 @@ public class BinTreeNodeWriter {
     }
 
     private void writeAttributes(Map<String, String> attributes) {
-        if (attributes.size() > 0) {
+        if (attributes != null && attributes.size() > 0) {
             for (Map.Entry<String, String> entry : attributes.entrySet()) {
                 this.writeString(entry.getKey());
                 this.writeString(entry.getValue());
@@ -153,7 +161,7 @@ public class BinTreeNodeWriter {
 
     private void writeListStart(int len) {
         if (len == 0) {
-            this.output += "\u0000";
+            this.output += (char) 0x00;
         } else if (len < 256) {
             this.output += "\u00f8" + (char) len;
         } else {
