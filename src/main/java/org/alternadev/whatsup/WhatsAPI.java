@@ -1,53 +1,75 @@
 package org.alternadev.whatsup;
 
+import com.sun.org.apache.xml.internal.security.exceptions.Base64DecodingException;
 import java.io.BufferedOutputStream;
 import java.io.BufferedWriter;
 import java.io.FileWriter;
+import com.sun.org.apache.xml.internal.security.utils.Base64;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.alternadev.whatsup.handler.IWhatsUp;
 
-public class WhatsAPI implements Runnable {
+public class WhatsAPI {
 
+    public static final int DEBUG_LEVEL_SEE_PACKETS = 1;
+    public static final int DEBUG_LEVEL_SEE_NODES = 2;
     private String phoneNumber;
     private String imei;
     private String name;
+    private String pw;
+    private String whatsAppHost = "bin-short.whatsapp.net";
+    private String whatsAppServer = "s.whatsapp.net";
+    private String whatsAppRealm = "s.whatsapp.net";
+    private String whatsAppDigest = "xmpp/s.whatsapp.net";
+    private String device = "iPhone";
+    private String whatsAppVer = "2.8.7";
     private int port = 5222;
     // private int timeoutSec = 2;
     // private int timeoutUsec = 0;
     private byte[] incompleteMessage;
+    private String _whatsAppUserAgent = "WhatsApp/2.3.53 S40Version/14.26 Device/Nokia302";
+    private String _whatsAppToken = "PdA2DJyKoUrwLw1Bg6EIhzh502dF9noR9uFCllGk1354754753509";
     private String disconnectedStatus = "disconnected";
     private String connectedStatus = "connected";
-    private String loginStatus = disconnectedStatus;
+    private String loginStatus;
     private Map<String, String> accountInfo;
-    private List<ProtocolNode> messageQueue = new ArrayList<ProtocolNode>();
-    ;
-
-	private Map<String, String> challenge = new HashMap<String, String>();
-    ;
-
-	private Socket socket;
-    private WhatsAppProtocol reader;
+    private List<ProtocolNode> messageQueue;
+    private WhatsAPIHandler handler;
+    private byte[] challenge;
+    private Socket socket;
+    private BinTreeNodeReader reader;
     private BinTreeNodeWriter writer;
-    private IWhatsUp handler;
-    private Thread listen_thread;
-    private boolean connected = false;
-
-    public WhatsAPI(IWhatsUp handler) {
-        Decode.init();
-        reader = new WhatsAppProtocol(Decode.getDictionary());
+    private KeyStream _inputKey;
+    private KeyStream _outputKey;
+    private int msgCounter = 1;
+    private int _debug_level = 0; // DEBUG_LEVEL_SEE_PACKETS | DEBUG_LEVEL_SEE_NODES;
+    private boolean listenning = false;
+    public WhatsAPI(String number, String imei, String name) {
+        Decode.initV287();
+        reader = new BinTreeNodeReader(Decode.getDictionary());
         writer = new BinTreeNodeWriter(Decode.getDictionary());
+        this.phoneNumber = number;
+        this.imei = imei;
+        this.name = name;
+        //this.challenge = "";
+        this.messageQueue = new ArrayList<ProtocolNode>();
+        this.loginStatus = this.disconnectedStatus;
+    }
+
+    public void setHandler(WhatsAPIHandler handler) {
         this.handler = handler;
     }
 
@@ -61,21 +83,28 @@ public class WhatsAPI implements Runnable {
     }
 
     protected ProtocolNode addAuth() {
-        Map<String, String> auth = new HashMap<String, String>();
-        auth.put("mechanism", "WAUTH-1");
+        LinkedHashMap<String, String> auth = new LinkedHashMap<String, String>();
 
         auth.put("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
+        auth.put("mechanism", "WAUTH-1");
+        auth.put("user", this.phoneNumber);
         return new ProtocolNode("auth", auth, null, "");
     }
 
-    public String encryptPassword() {
-        if (this.imei.indexOf(":") > -1) {
-            this.imei = imei.toUpperCase();
-            return md5(imei + imei);
-
-        } else {
-            return md5(reverse(this.imei));
+    public byte[] encryptPassword() {
+        try {
+            return com.sun.org.apache.xml.internal.security.utils.Base64.decode(pw);
+            //		if (this.imei.indexOf(":") > -1) {
+            //			this.imei = imei.toUpperCase();
+            //			return md5(imei + imei);
+            //
+            //		} else {
+            //		}
+            //		}
+        } catch (Base64DecodingException ex) {
+            Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
         }
+        return null;
     }
 
     private String reverse(String imei2) {
@@ -101,59 +130,29 @@ public class WhatsAPI implements Runnable {
         return hashtext;
     }
 
-    protected String authenticate(String nonce) {
-        String NC = "00000001";
-        String qop = "auth";
-        String cnonce = randomUUID();
+    protected byte[] authenticate() {
+        try {
+            //this.challenge = WhatsHelper.hexStringToByteArray("6adb3e8a60a9073f474a53aef0810421a2f71678");
+            byte[] key = WhatsHelper.deriveKey(this.encryptPassword(), this.challenge, 16, 20);
+            _inputKey = new KeyStream(key);
+            _outputKey = new KeyStream(key);
+            String d = phoneNumber + WhatsHelper.getString(challenge) + "1366667401"; //((int) (System.currentTimeMillis() / 1000));
+            return _outputKey.encode(WhatsHelper.getByteString(d), 0, d.length(), false);
 
-        String data1 = this.phoneNumber;
-        data1 += ":";
-        data1 += Constants.WHATSAPP_SERVER;
-        data1 += ":";
-        data1 += this.encryptPassword();
-
-        String data2 = (md5(data1));
-        data2 += ":";
-        data2 += nonce;
-        data2 += ":";
-        data2 += cnonce;
-
-        String data3 = "AUTHENTICATE:";
-        data3 += Constants.WHATSAPP_DIGEST;
-
-        String data4 = md5(data2);
-        data4 += ":";
-        data4 += nonce;
-        data4 += ":";
-        data4 += NC;
-        data4 += ":";
-        data4 += cnonce;
-        data4 += ":";
-        data4 += qop;
-        data4 += ":";
-        data4 += md5(data3);
-
-        String data5 = md5(data4);
-
-        String response = String
-                .format("username=\"%s\",realm=\"%s\",nonce=\"%s\",cnonce=\"%s\",nc=%s,qop=%s,digest-uri=\"%s\",response=%s,charset=utf-8",
-                this.phoneNumber, Constants.WHATSAPP_REALM, nonce, cnonce,
-                NC, qop, Constants.WHATSAPP_DIGEST, data5);
-        return response;
+        } catch (NoSuchAlgorithmException ex) {
+            Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (InvalidKeyException ex) {
+            Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return null;
     }
-    //TODO: 
-    protected String getResponse(String host, String query)
-    {
-        return "";
-    }
-    
+
     protected ProtocolNode addAuthResponse() {
-        String nonce = this.challenge.get("nonce");
-        String resp = this.authenticate(nonce);
-        Map<String, String> map = new HashMap<String, String>();
+        byte[] resp = this.authenticate();
+        LinkedHashMap<String, String> map = new LinkedHashMap<String, String>();
         map.put("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
         ProtocolNode node = new ProtocolNode("response", map, null,
-                Base64.encode(resp));
+                WhatsHelper.getString(resp));
         return node;
     }
 
@@ -161,8 +160,9 @@ public class WhatsAPI implements Runnable {
         try {
             BufferedOutputStream out = new BufferedOutputStream(
                     this.socket.getOutputStream());
-            out.write(in.getBytes());
-
+            for (int i = 0; i < in.length(); i++) {
+                out.write((byte) in.charAt(i));
+            }
             out.flush();
         } catch (IOException e) {
             // TODO Auto-generated catch block
@@ -171,16 +171,20 @@ public class WhatsAPI implements Runnable {
     }
 
     protected void sendNode(ProtocolNode node) {
-        System.out.println(node.nodeString("tx  "));
-        sendData(this.writer.write(node));
+        if ((_debug_level & DEBUG_LEVEL_SEE_PACKETS) == DEBUG_LEVEL_SEE_PACKETS) {
+            System.out.println(node.nodeString("tx  "));
+        }
+        String data = this.writer.write(node);
+        sendData(data);
     }
 
-    protected int readData(byte[] buffer, int leng) {
+    protected int readData(byte[] buffer) {
         try {
             // BufferedReader in = new BufferedReader(new InputStreamReader(
             // socket.getInputStream()));
-            int read = socket.getInputStream().read(buffer, 0, leng);
-            return read;
+            int leng = socket.getInputStream().read(buffer);
+
+            return leng;
             // ret += new String(input);
         } catch (IOException e) {
             // TODO Auto-generated catch block
@@ -190,13 +194,263 @@ public class WhatsAPI implements Runnable {
         return -1;
     }
 
+    public static int unsignedToBytes(byte a) {
+        int b = ((a & 0xFF));
+        return ((b));
+    }
+
     protected void processChallenge(ProtocolNode node) {
-        String challenge = Base64.decode(node.data);
-        String[] strs = challenge.split(",");
-        for (String s : strs) {
-            String[] k = s.split("=");
-            this.challenge.put(k[0], k[1].replace("\"", ""));
+        this.challenge = WhatsHelper.getByteString(node.data);
+    }
+
+    protected void processInboundData(byte[] data, int leng) {
+        try {
+            ProtocolNode node = reader.nextTree(data, leng);
+            while (node != null) {
+                if ((_debug_level & DEBUG_LEVEL_SEE_PACKETS) == DEBUG_LEVEL_SEE_PACKETS) {
+                    System.out.println(node.nodeString("rx  "));
+                }
+                if (node.tag.equals("challenge")) {
+                    this.processChallenge(node);
+                } else if (node.tag.equals("success")) {
+                    this.loginStatus = this.connectedStatus;
+                    this.accountInfo = new HashMap<String, String>();
+                    accountInfo.put("status", node.getAttribute("status"));
+                    accountInfo.put("kind", node.getAttribute("kind"));
+                    accountInfo.put("creation", node.getAttribute("creation"));
+                    accountInfo.put("expiration",
+                            node.getAttribute("expiration"));
+                    if (handler != null) {
+                        handler.onLogin(phoneNumber, node.getAttribute("status"),node.getAttribute("kind"),Long.parseLong(node.getAttribute("creation")) * 1000, Long.parseLong(node.getAttribute("expiration")) * 1000);
+                    }
+                }
+                if (node.tag.equals("message")) {
+                    messageQueue.add(node);
+                    sendMessageReceived(node);
+                    if(handler != null) handler.onMessageReceived(node);
+                    if(node.getChild("composing") != null)
+                    {
+                        if(handler != null) handler.onUserComposing(phoneNumber, node.getAttribute("from"));
+                    }
+                    if(node.getChild("paused") != null)
+                    {
+                        if(handler != null) handler.onUserPaused(phoneNumber, node.getAttribute("from"));
+                    }
+                    if(node.getChild("notify") != null)
+                    {
+                        if(handler != null) handler.onMessageReceivedText(phoneNumber, 
+                                node.getAttribute("from"),
+                                node.getAttribute("id"), 
+                                node.getAttribute("type"), 
+                                Long.parseLong(node.getAttribute("t")) * 1000, 
+                                node.children.get(0).getAttribute("name"), 
+                                node.children.get(2).data);
+                    }
+                    if(node.getChild("notify") != null)
+                    {
+                        if(node.getChild("body") != null)
+                        {
+                            if(handler != null) handler.onMessageReceivedText(phoneNumber, 
+                                    node.getAttribute("from"),
+                                    node.getAttribute("id"), 
+                                    node.getAttribute("type"), 
+                                    Long.parseLong(node.getAttribute("t")) * 1000, 
+                                    node.children.get(0).getAttribute("name"), 
+                                    node.getChild("body").data);
+                        }
+                        else if(node.getChild("media") != null)
+                        {
+                            ProtocolNode media = node.getChild("media");
+                            if(media.getAttribute("type").equals("image"))
+                            {
+                                if(handler != null) handler.onMessageReceivedImage(phoneNumber, 
+                                        node.getAttribute("from"),
+                                        node.getAttribute("id"), 
+                                        node.getAttribute("type"), 
+                                        Long.parseLong(node.getAttribute("t")) * 1000, 
+                                        node.children.get(0).getAttribute("name"), 
+                                        Integer.parseInt(media.getAttribute("size")),
+                                        media.getAttribute("url"),
+                                        media.getAttribute("file"),
+                                        media.getAttribute("mimetype"),
+                                        media.getAttribute("filehash"),
+                                        Integer.parseInt(media.getAttribute("width")),
+                                        Integer.parseInt(media.getAttribute("height")),
+                                        media.data);
+                            }
+                            else if(media.getAttribute("type").equals("video"))
+                            {
+                                if(handler != null) handler.onMessageReceivedVideo(phoneNumber, 
+                                        node.getAttribute("from"),
+                                        node.getAttribute("id"), 
+                                        node.getAttribute("type"), 
+                                        Long.parseLong(node.getAttribute("t")) * 1000, 
+                                        node.children.get(0).getAttribute("name"), 
+                                        Integer.parseInt(media.getAttribute("size")),
+                                        media.getAttribute("url"),
+                                        media.getAttribute("file"),
+                                        media.getAttribute("mimetype"),
+                                        media.getAttribute("filehash"),
+                                        Integer.parseInt(media.getAttribute("duration")),
+                                        media.getAttribute("vcodec"),
+                                        media.getAttribute("acodec"),
+                                        media.data);
+                            }
+                            else if(media.getAttribute("type").equals("audio"))
+                            {
+                                if(handler != null) handler.onMessageReceivedAudio(phoneNumber, 
+                                        node.getAttribute("from"),
+                                        node.getAttribute("id"), 
+                                        node.getAttribute("type"), 
+                                        Long.parseLong(node.getAttribute("t")) * 1000, 
+                                        node.children.get(0).getAttribute("name"), 
+                                        Integer.parseInt(media.getAttribute("size")),
+                                        media.getAttribute("url"),
+                                        media.getAttribute("file"),
+                                        media.getAttribute("mimetype"),
+                                        media.getAttribute("filehash"),
+                                        Integer.parseInt(media.getAttribute("duration")),
+                                        media.getAttribute("acodec"));
+                            }
+                        }
+                    }
+                    if(node.getChild("x") != null)
+                    {
+                        if(handler != null) handler.onMessageReceivedServer(phoneNumber, node.getAttribute("from"), node.getAttribute("id"), node.getAttribute("type"), Long.parseLong(node.getAttribute("t")) * 1000);
+                    }
+                    if(node.getChild("received") != null)
+                    {
+                        if(handler != null) handler.onMessageReceivedClient(phoneNumber, node.getAttribute("from"), node.getAttribute("id"), node.getAttribute("type"), Long.parseLong(node.getAttribute("t")) * 1000);
+                    }
+                    
+                }
+                if (node.tag.equals("iq")
+                        && node.attributeHash.get("type").equals("get")
+                        && node.children.get(0).tag.equals("ping")) {
+                    this.pong(node.getAttribute("id"));
+                }
+                if (node.tag.equals("failure")) {
+                    if (handler != null) {
+                        handler.onError(node);
+                    }
+                }
+
+                node = this.reader.nextTree();
+            }
+        } catch (IncompleteMessageException e) {
+            this.incompleteMessage = e.getData();
+            e.printStackTrace();
+        } catch (InvalidTokenException e) {
+            e.printStackTrace();
         }
+
+    }
+
+    public Map<String, String> accountInfo() {
+        return this.accountInfo;
+    }
+
+    public void connect() throws UnknownHostException, IOException {
+        socket = new Socket(this.whatsAppHost, this.port);
+    }
+
+    public boolean login(String pw) {
+
+        this.pw = pw;
+        String res = this.device + "-" + this.whatsAppVer + "-" + this.port;
+        String data = this.writer.startStream(this.whatsAppServer, res);
+        ProtocolNode feat = this.addFeatures();
+        ProtocolNode auth = this.addAuth();
+        this.sendData(data);
+        this.sendNode(feat);
+        this.sendNode(auth);
+        byte[] buffer = new byte[1024 * 2];
+        int leng = this.readData(buffer);
+        this.processInboundData(buffer, leng);
+
+        ProtocolNode data2 = this.addAuthResponse();
+        this.sendNode(data2);
+        reader.setKey(_inputKey);
+        writer.setKey(_outputKey);
+        int i = 0;
+        do {
+            if (!pollMessages()) {
+                return false;
+            }
+        } while ((i++ < 100)
+                && this.loginStatus.equals(this.disconnectedStatus));
+        return true;
+    }
+    byte[] poll_buffer = new byte[1024 * 2];
+
+    public boolean pollMessages() {
+        int leng = this.readData(poll_buffer);
+        if (leng < 0) {
+            if(handler != null) handler.onDisconnected();
+            return false;
+        }
+        this.processInboundData(poll_buffer, leng);
+        return true;
+    }
+
+    public void listen()
+    {
+        listenning  = true;
+        new Thread(new Runnable() {
+
+            public void run() {
+                while(pollMessages() && listenning);
+            }
+        }).start();
+    }
+    
+    public List<ProtocolNode> getMessages() {
+        List<ProtocolNode> ret = new ArrayList<ProtocolNode>();
+        ret.addAll(this.messageQueue);
+        this.messageQueue.clear();
+        return ret;
+
+    }
+
+    private String getMsgId() {
+        return String.valueOf((int) System.currentTimeMillis() / 1000) + "-" + this.msgCounter++;
+    }
+
+    protected void sendMessageNode(String to, ProtocolNode node) {
+        ProtocolNode serverNode = new ProtocolNode("server", null, null, "");
+
+        LinkedHashMap<String, String> xHash = new LinkedHashMap<String, String>();
+        xHash.put("xmlns", "jabber:x:event");
+        List<ProtocolNode> nodes = new ArrayList<ProtocolNode>();
+        nodes.add(serverNode);
+        ProtocolNode xNode = new ProtocolNode("x", xHash, nodes, "");
+        LinkedHashMap<String, String> notify = new LinkedHashMap<String, String>();
+        notify.put("xmlns", "urn:xmpp:whatsapp");
+        notify.put("name", this.name);
+        ProtocolNode notNode = new ProtocolNode("notify", notify, null, "");
+
+        LinkedHashMap<String, String> request = new LinkedHashMap<String, String>();
+        request.put("xmlns", "urn:xmpp:receipts");
+        ProtocolNode reqNode = new ProtocolNode("request", request, null, "");
+
+        LinkedHashMap<String, String> msgHash = new LinkedHashMap<String, String>();
+        msgHash.put("to", to + "@" + this.whatsAppServer);
+        msgHash.put("type", "chat");
+        msgHash.put("id", getMsgId());
+        msgHash.put("t", String.valueOf((int) (System.currentTimeMillis() / 1000)));
+        List<ProtocolNode> list = new ArrayList<ProtocolNode>();
+        list.add(xNode);
+        list.add(notNode);
+        list.add(reqNode);
+        list.add(node);
+        ProtocolNode messageNode = new ProtocolNode("message", msgHash, list,
+                "");
+        this.sendNode(messageNode);
+    }
+
+    public void sendMessage(String to, String txt) {
+        ProtocolNode bodyNode = new ProtocolNode("body", null, null, txt);
+        this.sendMessageNode(to, bodyNode);
     }
 
     protected void sendMessageReceived(ProtocolNode msg) {
@@ -204,11 +458,11 @@ public class WhatsAPI implements Runnable {
         if (reqNode != null) {
             String xmlns = reqNode.getAttribute("xmlns");
             if (xmlns.equals("urn:xmpp:receipts")) {
-                Map<String, String> recHash = new HashMap<String, String>();
+                LinkedHashMap<String, String> recHash = new LinkedHashMap<String, String>();
                 recHash.put("xmlns", "urn:xmpp:receipts");
                 ProtocolNode recNode = new ProtocolNode("received", recHash,
                         null, "");
-                Map<String, String> msgHash = new HashMap<String, String>();
+                LinkedHashMap<String, String> msgHash = new LinkedHashMap<String, String>();
                 msgHash.put("to", msg.getAttribute("from"));
                 msgHash.put("type", "chat");
                 msgHash.put("id", msg.getAttribute("id"));
@@ -221,76 +475,9 @@ public class WhatsAPI implements Runnable {
         }
     }
 
-    public Map<String, String> accountInfo() {
-        return this.accountInfo;
-    }
-
-    public boolean connect() {
-        try {
-            socket = new Socket(Constants.WHATSAPP_HOST, this.port);
-            connected = true;
-            this.listen_thread = new Thread(this);
-            this.listen_thread.start();
-            return true;
-        } catch (UnknownHostException ex) {
-            Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (IOException ex) {
-            Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
-        }
-        return false;
-    }
-
-    public void login(String number, String imei, String name) {
-        this.phoneNumber = number;
-        this.imei = imei;
-        this.name = name;
-        String res = Constants.WHATSAPP_DEVICE + "-" + Constants.WHATSAPP_VERSION + "-" + this.port;
-        String data = this.writer.startStream(Constants.WHATSAPP_SERVER, res);
-        ProtocolNode feat = this.addFeatures();
-        ProtocolNode auth = this.addAuth();
-        this.sendData(data);
-        this.sendNode(feat);
-        this.sendNode(auth);
-
-
-    }
-
-    public List<ProtocolNode> getMessages() {
-        List<ProtocolNode> ret = new ArrayList<ProtocolNode>();
-        ret.addAll(this.messageQueue);
-        this.messageQueue.clear();
-        return ret;
-    }
-
-    protected void sendMessageNode(String msgid, String to, ProtocolNode node) {
-        ProtocolNode serverNode = new ProtocolNode("server", null, null, "");
-
-        Map<String, String> xHash = new HashMap<String, String>();
-        xHash.put("xmlns", "jabber:x:event");
-        List<ProtocolNode> nodes = new ArrayList<ProtocolNode>();
-        nodes.add(serverNode);
-        ProtocolNode xNode = new ProtocolNode("x", xHash, nodes, "");
-
-        Map<String, String> msgHash = new HashMap<String, String>();
-        msgHash.put("to", to + "@" + Constants.WHATSAPP_SERVER);
-        msgHash.put("type", "chat");
-        msgHash.put("id", msgid);
-        List<ProtocolNode> list = new ArrayList<ProtocolNode>();
-        list.add(xNode);
-        list.add(node);
-        ProtocolNode messageNode = new ProtocolNode("message", msgHash, list,
-                "");
-        this.sendNode(messageNode);
-    }
-
-    public void sendMessage(String msgid, String to, String txt) {
-        ProtocolNode bodyNode = new ProtocolNode("body", null, null, txt);
-        this.sendMessageNode(msgid, to, bodyNode);
-    }
-
-    public void sendMessageImage(String msgid, String to, String url,
+    public void sendMessageImage(String to, String url,
             String file, String size, String icon) {
-        Map<String, String> map = new HashMap<String, String>();
+        LinkedHashMap<String, String> map = new LinkedHashMap<String, String>();
         map.put("xmlns", "urn:xmpp:whatsapp:mms");
         map.put("type", "image");
         map.put("url", url);
@@ -298,12 +485,12 @@ public class WhatsAPI implements Runnable {
         map.put("size", size);
 
         ProtocolNode mediaNode = new ProtocolNode("media", map, null, icon);
-        this.sendMessageNode(msgid, to, mediaNode);
+        this.sendMessageNode(to, mediaNode);
     }
 
     public void pong(String msgid) {
-        Map<String, String> map = new HashMap<String, String>();
-        map.put("to", Constants.WHATSAPP_SERVER);
+        LinkedHashMap<String, String> map = new LinkedHashMap<String, String>();
+        map.put("to", this.whatsAppServer);
         map.put("id", msgid);
         map.put("type", "result");
         this.sendNode(new ProtocolNode("iq", map, null, ""));
@@ -312,70 +499,5 @@ public class WhatsAPI implements Runnable {
     private String randomUUID() {
         UUID karl = UUID.randomUUID();
         return karl.toString();
-    }
-
-    public void run() {
-        //Listen for incoming messages
-        int buff_leng = 1024;
-        byte[] buffer = new byte[buff_leng];
-        int read_leng = 0;
-        while (this.connected) {
-            if ((read_leng = this.readData(buffer, buff_leng)) > -1) {
-                processData(buffer, read_leng);
-            } else {
-                //Connection Error!
-                break;
-            }
-        }
-        if (handler != null) {
-            handler.onDisconect(this);
-        }
-        connected = false;
-    }
-
-    private void processData(byte[] data, int leng) {
-        reader.addData(data, leng);
-        processData();
-    }
-
-    private void processData() {
-        try {
-            ProtocolNode node;;
-            // if(node != null) System.out.println(node != null);
-            while ((node = reader.nextTree()) != null) {
-                System.out.println(node.nodeString("rx  "));
-                if (node.tag.equals("challenge")) {
-                    this.processChallenge(node);
-                    ProtocolNode data2 = this.addAuthResponse();
-                    this.sendNode(data2);
-                } else if (node.tag.equals("success")) {
-                    this.loginStatus = this.connectedStatus;
-                    this.accountInfo = new HashMap<String, String>();
-                    accountInfo.put("status", node.getAttribute("status"));
-                    accountInfo.put("kind", node.getAttribute("kind"));
-                    accountInfo.put("creation", node.getAttribute("creation"));
-                    accountInfo.put("expiration",
-                            node.getAttribute("expiration"));
-                    if (handler != null) {
-                        handler.onLogin(this, accountInfo);
-                    }
-                }
-                if (node.tag.equals("message")) {
-                    messageQueue.add(node);
-                    sendMessageReceived(node);
-                    if (handler != null) {
-                        handler.onMessageReceived(this, node);
-                    }
-                }
-                if (node.tag.equals("iq")
-                        && node.attributeHash.get("type").equals("get")
-                        && node.children.get(0).tag.equals("ping")) {
-                    this.pong(node.attributeHash.get("id"));
-                }
-            }
-
-        } catch (InvalidTokenException e) {
-            e.printStackTrace();
-        }
     }
 }
