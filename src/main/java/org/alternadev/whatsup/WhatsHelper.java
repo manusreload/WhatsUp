@@ -67,6 +67,7 @@ public class WhatsHelper {
 
     public static byte[] deriveKey(byte[] password, byte[] salt, int iterationCount, int dkLen)
             throws java.security.NoSuchAlgorithmException, java.security.InvalidKeyException {
+        if(password == null) return null;
         SecretKeySpec keyspec = new SecretKeySpec(password, "Hmacsha1");
         Mac prf = Mac.getInstance("Hmacsha1");
         prf.init(keyspec);

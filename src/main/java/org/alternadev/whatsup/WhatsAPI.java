@@ -32,6 +32,7 @@ public class WhatsAPI {
     private String pw;
     private String whatsAppHost = "bin-short.whatsapp.net";
     private String whatsAppServer = "s.whatsapp.net";
+    private String whatsAppGroupServer = "g.us";
     private String whatsAppRealm = "s.whatsapp.net";
     private String whatsAppDigest = "xmpp/s.whatsapp.net";
     private String device = "iPhone";
@@ -55,15 +56,26 @@ public class WhatsAPI {
     private KeyStream _inputKey;
     private KeyStream _outputKey;
     private int msgCounter = 1;
-    private int _debug_level = 0; // DEBUG_LEVEL_SEE_PACKETS | DEBUG_LEVEL_SEE_NODES;
+    private int _debug_level =  DEBUG_LEVEL_SEE_PACKETS | DEBUG_LEVEL_SEE_NODES;
     private boolean listenning = false;
+
+    public WhatsAPI() {
+        init();
+    }
+
     public WhatsAPI(String number, String imei, String name) {
-        Decode.initV287();
-        reader = new BinTreeNodeReader(Decode.getDictionary());
-        writer = new BinTreeNodeWriter(Decode.getDictionary());
+
         this.phoneNumber = number;
         this.imei = imei;
         this.name = name;
+        init();
+    }
+    
+
+    private void init() {
+        Decode.initV287();
+        reader = new BinTreeNodeReader(Decode.getDictionary());
+        writer = new BinTreeNodeWriter(Decode.getDictionary());
         //this.challenge = "";
         this.messageQueue = new ArrayList<ProtocolNode>();
         this.loginStatus = this.disconnectedStatus;
@@ -87,13 +99,13 @@ public class WhatsAPI {
 
         auth.put("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
         auth.put("mechanism", "WAUTH-1");
-        auth.put("user", this.phoneNumber);
+        auth.put("user", this.getPhoneNumber());
         return new ProtocolNode("auth", auth, null, "");
     }
 
     public byte[] encryptPassword() {
         try {
-            return com.sun.org.apache.xml.internal.security.utils.Base64.decode(pw);
+            return com.sun.org.apache.xml.internal.security.utils.Base64.decode(getPassword());
             //		if (this.imei.indexOf(":") > -1) {
             //			this.imei = imei.toUpperCase();
             //			return md5(imei + imei);
@@ -134,9 +146,10 @@ public class WhatsAPI {
         try {
             //this.challenge = WhatsHelper.hexStringToByteArray("6adb3e8a60a9073f474a53aef0810421a2f71678");
             byte[] key = WhatsHelper.deriveKey(this.encryptPassword(), this.challenge, 16, 20);
+            if(key == null) return null;
             _inputKey = new KeyStream(key);
             _outputKey = new KeyStream(key);
-            String d = phoneNumber + WhatsHelper.getString(challenge) + "1366667401"; //((int) (System.currentTimeMillis() / 1000));
+            String d = getPhoneNumber() + WhatsHelper.getString(challenge) + "1366667401"; //((int) (System.currentTimeMillis() / 1000));
             return _outputKey.encode(WhatsHelper.getByteString(d), 0, d.length(), false);
 
         } catch (NoSuchAlgorithmException ex) {
@@ -149,6 +162,7 @@ public class WhatsAPI {
 
     protected ProtocolNode addAuthResponse() {
         byte[] resp = this.authenticate();
+        if(resp == null) return null;
         LinkedHashMap<String, String> map = new LinkedHashMap<String, String>();
         map.put("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
         ProtocolNode node = new ProtocolNode("response", map, null,
@@ -221,108 +235,104 @@ public class WhatsAPI {
                     accountInfo.put("expiration",
                             node.getAttribute("expiration"));
                     if (handler != null) {
-                        handler.onLogin(phoneNumber, node.getAttribute("status"),node.getAttribute("kind"),Long.parseLong(node.getAttribute("creation")) * 1000, Long.parseLong(node.getAttribute("expiration")) * 1000);
+                        handler.onLogin(getPhoneNumber(), node.getAttribute("status"), node.getAttribute("kind"), Long.parseLong(node.getAttribute("creation")) * 1000, Long.parseLong(node.getAttribute("expiration")) * 1000);
                     }
                 }
                 if (node.tag.equals("message")) {
                     messageQueue.add(node);
                     sendMessageReceived(node);
-                    if(handler != null) handler.onMessageReceived(node);
-                    if(node.getChild("composing") != null)
-                    {
-                        if(handler != null) handler.onUserComposing(phoneNumber, node.getAttribute("from"));
+                    if (handler != null) {
+                        handler.onMessageReceived(node);
                     }
-                    if(node.getChild("paused") != null)
-                    {
-                        if(handler != null) handler.onUserPaused(phoneNumber, node.getAttribute("from"));
-                    }
-                    if(node.getChild("notify") != null)
-                    {
-                        if(handler != null) handler.onMessageReceivedText(phoneNumber, 
-                                node.getAttribute("from"),
-                                node.getAttribute("id"), 
-                                node.getAttribute("type"), 
-                                Long.parseLong(node.getAttribute("t")) * 1000, 
-                                node.children.get(0).getAttribute("name"), 
-                                node.children.get(2).data);
-                    }
-                    if(node.getChild("notify") != null)
-                    {
-                        if(node.getChild("body") != null)
-                        {
-                            if(handler != null) handler.onMessageReceivedText(phoneNumber, 
-                                    node.getAttribute("from"),
-                                    node.getAttribute("id"), 
-                                    node.getAttribute("type"), 
-                                    Long.parseLong(node.getAttribute("t")) * 1000, 
-                                    node.children.get(0).getAttribute("name"), 
-                                    node.getChild("body").data);
+                    if (node.getChild("composing") != null) {
+                        if (handler != null) {
+                            handler.onUserComposing(getPhoneNumber(), node.getAttribute("from"));
                         }
-                        else if(node.getChild("media") != null)
-                        {
+                    }
+                    if (node.getChild("paused") != null) {
+                        if (handler != null) {
+                            handler.onUserPaused(getPhoneNumber(), node.getAttribute("from"));
+                        }
+                    }
+                    if (node.getChild("notify") != null && !node.getChild("notify").getAttribute("name").equals("")
+                             && node.getChild("body") != null) {
+                        if (node.getChild("body") != null) {
+                            if (handler != null) {
+                                handler.onMessageReceivedText(getPhoneNumber(),
+                                        node.getAttribute("from"),
+                                        node.getAttribute("id"),
+                                        node.getAttribute("type"),
+                                        Long.parseLong(node.getAttribute("t")) * 1000,
+                                        node.getChild("notify").getAttribute("name"),
+                                        node.getChild("body").data);
+                            }
+                        } else if (node.getChild("media") != null) {
                             ProtocolNode media = node.getChild("media");
-                            if(media.getAttribute("type").equals("image"))
-                            {
-                                if(handler != null) handler.onMessageReceivedImage(phoneNumber, 
-                                        node.getAttribute("from"),
-                                        node.getAttribute("id"), 
-                                        node.getAttribute("type"), 
-                                        Long.parseLong(node.getAttribute("t")) * 1000, 
-                                        node.children.get(0).getAttribute("name"), 
-                                        Integer.parseInt(media.getAttribute("size")),
-                                        media.getAttribute("url"),
-                                        media.getAttribute("file"),
-                                        media.getAttribute("mimetype"),
-                                        media.getAttribute("filehash"),
-                                        Integer.parseInt(media.getAttribute("width")),
-                                        Integer.parseInt(media.getAttribute("height")),
-                                        media.data);
-                            }
-                            else if(media.getAttribute("type").equals("video"))
-                            {
-                                if(handler != null) handler.onMessageReceivedVideo(phoneNumber, 
-                                        node.getAttribute("from"),
-                                        node.getAttribute("id"), 
-                                        node.getAttribute("type"), 
-                                        Long.parseLong(node.getAttribute("t")) * 1000, 
-                                        node.children.get(0).getAttribute("name"), 
-                                        Integer.parseInt(media.getAttribute("size")),
-                                        media.getAttribute("url"),
-                                        media.getAttribute("file"),
-                                        media.getAttribute("mimetype"),
-                                        media.getAttribute("filehash"),
-                                        Integer.parseInt(media.getAttribute("duration")),
-                                        media.getAttribute("vcodec"),
-                                        media.getAttribute("acodec"),
-                                        media.data);
-                            }
-                            else if(media.getAttribute("type").equals("audio"))
-                            {
-                                if(handler != null) handler.onMessageReceivedAudio(phoneNumber, 
-                                        node.getAttribute("from"),
-                                        node.getAttribute("id"), 
-                                        node.getAttribute("type"), 
-                                        Long.parseLong(node.getAttribute("t")) * 1000, 
-                                        node.children.get(0).getAttribute("name"), 
-                                        Integer.parseInt(media.getAttribute("size")),
-                                        media.getAttribute("url"),
-                                        media.getAttribute("file"),
-                                        media.getAttribute("mimetype"),
-                                        media.getAttribute("filehash"),
-                                        Integer.parseInt(media.getAttribute("duration")),
-                                        media.getAttribute("acodec"));
+                            if (media.getAttribute("type").equals("image")) {
+                                if (handler != null) {
+                                    handler.onMessageReceivedImage(getPhoneNumber(),
+                                            node.getAttribute("from"),
+                                            node.getAttribute("id"),
+                                            node.getAttribute("type"),
+                                            Long.parseLong(node.getAttribute("t")) * 1000,
+                                            node.children.get(0).getAttribute("name"),
+                                            Integer.parseInt(media.getAttribute("size")),
+                                            media.getAttribute("url"),
+                                            media.getAttribute("file"),
+                                            media.getAttribute("mimetype"),
+                                            media.getAttribute("filehash"),
+                                            Integer.parseInt(media.getAttribute("width")),
+                                            Integer.parseInt(media.getAttribute("height")),
+                                            media.data);
+                                }
+                            } else if (media.getAttribute("type").equals("video")) {
+                                if (handler != null) {
+                                    handler.onMessageReceivedVideo(getPhoneNumber(),
+                                            node.getAttribute("from"),
+                                            node.getAttribute("id"),
+                                            node.getAttribute("type"),
+                                            Long.parseLong(node.getAttribute("t")) * 1000,
+                                            node.children.get(0).getAttribute("name"),
+                                            Integer.parseInt(media.getAttribute("size")),
+                                            media.getAttribute("url"),
+                                            media.getAttribute("file"),
+                                            media.getAttribute("mimetype"),
+                                            media.getAttribute("filehash"),
+                                            Integer.parseInt(media.getAttribute("duration")),
+                                            media.getAttribute("vcodec"),
+                                            media.getAttribute("acodec"),
+                                            media.data);
+                                }
+                            } else if (media.getAttribute("type").equals("audio")) {
+                                if (handler != null) {
+                                    handler.onMessageReceivedAudio(getPhoneNumber(),
+                                            node.getAttribute("from"),
+                                            node.getAttribute("id"),
+                                            node.getAttribute("type"),
+                                            Long.parseLong(node.getAttribute("t")) * 1000,
+                                            node.children.get(0).getAttribute("name"),
+                                            Integer.parseInt(media.getAttribute("size")),
+                                            media.getAttribute("url"),
+                                            media.getAttribute("file"),
+                                            media.getAttribute("mimetype"),
+                                            media.getAttribute("filehash"),
+                                            Integer.parseInt(media.getAttribute("duration")),
+                                            media.getAttribute("acodec"));
+                                }
                             }
                         }
                     }
-                    if(node.getChild("x") != null)
-                    {
-                        if(handler != null) handler.onMessageReceivedServer(phoneNumber, node.getAttribute("from"), node.getAttribute("id"), node.getAttribute("type"), Long.parseLong(node.getAttribute("t")) * 1000);
+                    if (node.getChild("x") != null) {
+                        if (handler != null) {
+                            handler.onMessageReceivedServer(getPhoneNumber(), node.getAttribute("from"), node.getAttribute("id"), node.getAttribute("type"), Long.parseLong(node.getAttribute("t")) * 1000);
+                        }
                     }
-                    if(node.getChild("received") != null)
-                    {
-                        if(handler != null) handler.onMessageReceivedClient(phoneNumber, node.getAttribute("from"), node.getAttribute("id"), node.getAttribute("type"), Long.parseLong(node.getAttribute("t")) * 1000);
+                    if (node.getChild("received") != null) {
+                        if (handler != null) {
+                            handler.onMessageReceivedClient(getPhoneNumber(), node.getAttribute("from"), node.getAttribute("id"), node.getAttribute("type"), Long.parseLong(node.getAttribute("t")) * 1000);
+                        }
                     }
-                    
+
                 }
                 if (node.tag.equals("iq")
                         && node.attributeHash.get("type").equals("get")
@@ -354,9 +364,12 @@ public class WhatsAPI {
         socket = new Socket(this.whatsAppHost, this.port);
     }
 
-    public boolean login(String pw) {
+    public boolean login(String pw){
+        this.setPassword(pw);
+        return login();
+    }
+    public boolean login() {
 
-        this.pw = pw;
         String res = this.device + "-" + this.whatsAppVer + "-" + this.port;
         String data = this.writer.startStream(this.whatsAppServer, res);
         ProtocolNode feat = this.addFeatures();
@@ -366,9 +379,11 @@ public class WhatsAPI {
         this.sendNode(auth);
         byte[] buffer = new byte[1024 * 2];
         int leng = this.readData(buffer);
+        if(leng < 0) return false;
         this.processInboundData(buffer, leng);
 
         ProtocolNode data2 = this.addAuthResponse();
+        if(data2 == null) return false;
         this.sendNode(data2);
         reader.setKey(_inputKey);
         writer.setKey(_outputKey);
@@ -386,24 +401,25 @@ public class WhatsAPI {
     public boolean pollMessages() {
         int leng = this.readData(poll_buffer);
         if (leng < 0) {
-            if(handler != null) handler.onDisconnected();
+            if (handler != null) {
+                handler.onDisconnected();
+            }
+            disconnect();
             return false;
         }
         this.processInboundData(poll_buffer, leng);
         return true;
     }
 
-    public void listen()
-    {
-        listenning  = true;
+    public void listen() {
+        listenning = true;
         new Thread(new Runnable() {
-
             public void run() {
-                while(pollMessages() && listenning);
+                while (pollMessages() && listenning);
             }
         }).start();
     }
-    
+
     public List<ProtocolNode> getMessages() {
         List<ProtocolNode> ret = new ArrayList<ProtocolNode>();
         ret.addAll(this.messageQueue);
@@ -416,7 +432,7 @@ public class WhatsAPI {
         return String.valueOf((int) System.currentTimeMillis() / 1000) + "-" + this.msgCounter++;
     }
 
-    protected void sendMessageNode(String to, ProtocolNode node) {
+    protected String sendMessageNode(String to, ProtocolNode node) {
         ProtocolNode serverNode = new ProtocolNode("server", null, null, "");
 
         LinkedHashMap<String, String> xHash = new LinkedHashMap<String, String>();
@@ -426,7 +442,7 @@ public class WhatsAPI {
         ProtocolNode xNode = new ProtocolNode("x", xHash, nodes, "");
         LinkedHashMap<String, String> notify = new LinkedHashMap<String, String>();
         notify.put("xmlns", "urn:xmpp:whatsapp");
-        notify.put("name", this.name);
+        notify.put("name", this.getName());
         ProtocolNode notNode = new ProtocolNode("notify", notify, null, "");
 
         LinkedHashMap<String, String> request = new LinkedHashMap<String, String>();
@@ -434,7 +450,14 @@ public class WhatsAPI {
         ProtocolNode reqNode = new ProtocolNode("request", request, null, "");
 
         LinkedHashMap<String, String> msgHash = new LinkedHashMap<String, String>();
-        msgHash.put("to", to + "@" + this.whatsAppServer);
+        if(to.indexOf("-") > 0)
+        {
+            msgHash.put("to", to + "@" + this.whatsAppGroupServer);
+        }
+        else
+        {
+            msgHash.put("to", to + "@" + this.whatsAppServer);
+        }
         msgHash.put("type", "chat");
         msgHash.put("id", getMsgId());
         msgHash.put("t", String.valueOf((int) (System.currentTimeMillis() / 1000)));
@@ -446,11 +469,12 @@ public class WhatsAPI {
         ProtocolNode messageNode = new ProtocolNode("message", msgHash, list,
                 "");
         this.sendNode(messageNode);
+        return msgHash.get("id");
     }
 
-    public void sendMessage(String to, String txt) {
+    public String sendMessage(String to, String txt) {
         ProtocolNode bodyNode = new ProtocolNode("body", null, null, txt);
-        this.sendMessageNode(to, bodyNode);
+        return this.sendMessageNode(to, bodyNode);
     }
 
     protected void sendMessageReceived(ProtocolNode msg) {
@@ -496,8 +520,73 @@ public class WhatsAPI {
         this.sendNode(new ProtocolNode("iq", map, null, ""));
     }
 
+    public void disconnect()
+    {
+        try {
+            socket.close();
+        } catch (IOException ex) {
+            Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        init();
+    }
     private String randomUUID() {
         UUID karl = UUID.randomUUID();
         return karl.toString();
+    }
+
+    /**
+     * @return the phoneNumber
+     */
+    public String getPhoneNumber() {
+        return phoneNumber;
+    }
+
+    /**
+     * @param phoneNumber the phoneNumber to set
+     */
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
+    }
+
+    /**
+     * @return the imei
+     */
+    public String getImei() {
+        return imei;
+    }
+
+    /**
+     * @param imei the imei to set
+     */
+    public void setImei(String imei) {
+        this.imei = imei;
+    }
+
+    /**
+     * @return the name
+     */
+    public String getName() {
+        return name;
+    }
+
+    /**
+     * @param name the name to set
+     */
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    /**
+     * @return the pw
+     */
+    public String getPassword() {
+        return pw;
+    }
+
+    /**
+     * @param pw the pw to set
+     */
+    public void setPassword(String pw) {
+        this.pw = pw;
     }
 }

@@ -51,7 +51,7 @@ public class ProtocolNode {
 	}
 
 	public ProtocolNode getChild(String tag) {
-		if (!this.children.isEmpty()) {
+		if (this.children != null && !this.children.isEmpty()) {
 			for (ProtocolNode child : children) {
 				if (child.tag.equals(tag))
 					return child;
