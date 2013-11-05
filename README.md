@@ -8,12 +8,12 @@ The mobilephone-number has to be in the format "ccxxxxx...", so for example: "49
 ## Simple usagre
 
 ```java
-        WhatsAPI api = new WhatsAPI(PHONE_NUMBER, IMEI, USERNAME);
+WhatsAPI api = new WhatsAPI(PHONE_NUMBER, IMEI, USERNAME);
 
-        api.setHandler(new WhatsAppHandler()); //For incoming events like new message, login...
-        api.connect();
-        api.login(PW); //Your password in Base64 encoded
-        api.listen(); //Listen for incoming data
+api.setHandler(new WhatsAppHandler()); //For incoming events like new message, login...
+api.connect();
+api.login(PW); //Your password in Base64 encoded
+api.listen(); //Listen for incoming data
 ```
 
 ## I've got no idea for a appropriate title for this, so just deal with this really long thing...

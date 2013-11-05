@@ -2,7 +2,7 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package org.alternadev.whatsup;
+package com.manus.whatsapp;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;

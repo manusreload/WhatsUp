@@ -1,4 +1,4 @@
-package org.alternadev.whatsup;
+package com.manus.whatsapp;
 
 public class IncompleteMessageException extends Exception {
 

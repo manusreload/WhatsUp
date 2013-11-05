@@ -1,4 +1,4 @@
-package org.alternadev.whatsup;
+package com.manus.whatsapp;
 
 import java.util.ArrayList;
 import java.util.HashMap;

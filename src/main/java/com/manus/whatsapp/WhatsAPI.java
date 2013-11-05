@@ -1,4 +1,4 @@
-package org.alternadev.whatsup;
+package com.manus.whatsapp;
 
 import com.sun.org.apache.xml.internal.security.exceptions.Base64DecodingException;
 import java.io.BufferedOutputStream;
