@@ -1,10 +1,8 @@
 package com.manus.whatsapp;
 
-import com.sun.org.apache.xml.internal.security.exceptions.Base64DecodingException;
 import java.io.BufferedOutputStream;
 import java.io.BufferedWriter;
 import java.io.FileWriter;
-import com.sun.org.apache.xml.internal.security.utils.Base64;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
@@ -21,6 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import sun.misc.BASE64Decoder;
 
 public class WhatsAPI {
 
@@ -40,7 +39,7 @@ public class WhatsAPI {
     private int port = 5222;
     // private int timeoutSec = 2;
     // private int timeoutUsec = 0;
-    private byte[] incompleteMessage;
+    //private byte[] incompleteMessage;
     private String _whatsAppUserAgent = "WhatsApp/2.3.53 S40Version/14.26 Device/Nokia302";
     private String _whatsAppToken = "PdA2DJyKoUrwLw1Bg6EIhzh502dF9noR9uFCllGk1354754753509";
     private String disconnectedStatus = "disconnected";
@@ -56,7 +55,7 @@ public class WhatsAPI {
     private KeyStream _inputKey;
     private KeyStream _outputKey;
     private int msgCounter = 1;
-    private int _debug_level =  DEBUG_LEVEL_SEE_PACKETS | DEBUG_LEVEL_SEE_NODES;
+    private int _debug_level = DEBUG_LEVEL_SEE_PACKETS | DEBUG_LEVEL_SEE_NODES;
     private boolean listenning = false;
 
     public WhatsAPI() {
@@ -70,7 +69,6 @@ public class WhatsAPI {
         this.name = name;
         init();
     }
-    
 
     private void init() {
         Decode.initV287();
@@ -105,15 +103,9 @@ public class WhatsAPI {
 
     public byte[] encryptPassword() {
         try {
-            return com.sun.org.apache.xml.internal.security.utils.Base64.decode(getPassword());
-            //		if (this.imei.indexOf(":") > -1) {
-            //			this.imei = imei.toUpperCase();
-            //			return md5(imei + imei);
-            //
-            //		} else {
-            //		}
-            //		}
-        } catch (Base64DecodingException ex) {
+            BASE64Decoder dec = new BASE64Decoder();
+            return dec.decodeBuffer(getPassword());
+        } catch (IOException ex) {
             Logger.getLogger(WhatsAPI.class.getName()).log(Level.SEVERE, null, ex);
         }
         return null;
@@ -123,30 +115,15 @@ public class WhatsAPI {
         return new StringBuffer(imei2).reverse().toString();
     }
 
-    private String md5(String s) {
-        MessageDigest m = null;
-        try {
-            m = MessageDigest.getInstance("MD5");
-        } catch (NoSuchAlgorithmException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-        m.reset();
-        m.update(s.getBytes());
-        byte[] digest = m.digest();
-        BigInteger bigInt = new BigInteger(1, digest);
-        String hashtext = bigInt.toString(16);
-        while (hashtext.length() < 32) {
-            hashtext = "0" + hashtext;
-        }
-        return hashtext;
-    }
+    
 
     protected byte[] authenticate() {
         try {
             //this.challenge = WhatsHelper.hexStringToByteArray("6adb3e8a60a9073f474a53aef0810421a2f71678");
             byte[] key = WhatsHelper.deriveKey(this.encryptPassword(), this.challenge, 16, 20);
-            if(key == null) return null;
+            if (key == null) {
+                return null;
+            }
             _inputKey = new KeyStream(key);
             _outputKey = new KeyStream(key);
             String d = getPhoneNumber() + WhatsHelper.getString(challenge) + "1366667401"; //((int) (System.currentTimeMillis() / 1000));
@@ -162,7 +139,9 @@ public class WhatsAPI {
 
     protected ProtocolNode addAuthResponse() {
         byte[] resp = this.authenticate();
-        if(resp == null) return null;
+        if (resp == null) {
+            return null;
+        }
         LinkedHashMap<String, String> map = new LinkedHashMap<String, String>();
         map.put("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
         ProtocolNode node = new ProtocolNode("response", map, null,
@@ -255,7 +234,7 @@ public class WhatsAPI {
                         }
                     }
                     if (node.getChild("notify") != null && !node.getChild("notify").getAttribute("name").equals("")
-                             && node.getChild("body") != null) {
+                            && node.getChild("body") != null) {
                         if (node.getChild("body") != null) {
                             if (handler != null) {
                                 handler.onMessageReceivedText(getPhoneNumber(),
@@ -348,7 +327,7 @@ public class WhatsAPI {
                 node = this.reader.nextTree();
             }
         } catch (IncompleteMessageException e) {
-            this.incompleteMessage = e.getData();
+//            this.incompleteMessage = e.getData();
             e.printStackTrace();
         } catch (InvalidTokenException e) {
             e.printStackTrace();
@@ -364,10 +343,11 @@ public class WhatsAPI {
         socket = new Socket(this.whatsAppHost, this.port);
     }
 
-    public boolean login(String pw){
+    public boolean login(String pw) {
         this.setPassword(pw);
         return login();
     }
+
     public boolean login() {
 
         String res = this.device + "-" + this.whatsAppVer + "-" + this.port;
@@ -379,11 +359,15 @@ public class WhatsAPI {
         this.sendNode(auth);
         byte[] buffer = new byte[1024 * 2];
         int leng = this.readData(buffer);
-        if(leng < 0) return false;
+        if (leng < 0) {
+            return false;
+        }
         this.processInboundData(buffer, leng);
 
         ProtocolNode data2 = this.addAuthResponse();
-        if(data2 == null) return false;
+        if (data2 == null) {
+            return false;
+        }
         this.sendNode(data2);
         reader.setKey(_inputKey);
         writer.setKey(_outputKey);
@@ -450,12 +434,9 @@ public class WhatsAPI {
         ProtocolNode reqNode = new ProtocolNode("request", request, null, "");
 
         LinkedHashMap<String, String> msgHash = new LinkedHashMap<String, String>();
-        if(to.indexOf("-") > 0)
-        {
+        if (to.indexOf("-") > 0) {
             msgHash.put("to", to + "@" + this.whatsAppGroupServer);
-        }
-        else
-        {
+        } else {
             msgHash.put("to", to + "@" + this.whatsAppServer);
         }
         msgHash.put("type", "chat");
@@ -520,8 +501,7 @@ public class WhatsAPI {
         this.sendNode(new ProtocolNode("iq", map, null, ""));
     }
 
-    public void disconnect()
-    {
+    public void disconnect() {
         try {
             socket.close();
         } catch (IOException ex) {
@@ -529,6 +509,7 @@ public class WhatsAPI {
         }
         init();
     }
+
     private String randomUUID() {
         UUID karl = UUID.randomUUID();
         return karl.toString();

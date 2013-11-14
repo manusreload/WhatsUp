@@ -18,9 +18,10 @@ public class Constants {
     public static final String WHATSAPP_CHE_HOST = "v.whatsapp.net/v2/exist";
     public static final String WHATSAPP_DIGEST = "xmpp/s.whatsapp.net";
      // User agent and token used in reques/registration code.
-    public static final String WHATSAPP_USER_AGENT = "WhatsApp/2.3.53 S40Version/14.26 Device/Nokia302";
-    public static final String WHATSAPP_TOKEN = "PdA2DJyKoUrwLw1Bg6EIhzh502dF9noR9uFCllGk1354754753509";
-    
+    public static final String WHATSAPP_USER_AGENT = "WhatsApp/2.11.113 Android/4.3 Device/GalaxyS3";
+    public static final String WHATSAPP_TOKEN = "Od52pFozHNWF9XbTN5lrqDtnsiZGL2G3l9yw1GiQ21a31a2d9dbdc9a8ce324ef2df918064fd26e30a";
+    //public static final  String WHATSAPP_TOKEN = "Od52pFozHNWF9XbTN5lrqDtnsiZGL2G3l9yw1GiQ21a31a2d9dbdc9a8ce324ef2df918064fd26e30a";
+        
     public static final String WHATSAPP_DEVICE = "iPhone";
     public static final String WHATSAPP_VERSION = "2.8.2";
 }

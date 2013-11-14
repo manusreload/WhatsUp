@@ -12,14 +12,17 @@ public class Base64 {
         }
     }
 
+    public static String encode(String input)
+    {
+        return encode(input.getBytes());
+    }
     /**
      * Encodes the specified String into a Base64-String.
      *
      * @param String The string which should be encoded.
      * @return The Base64-encoded String
      */
-    public static String encode(String string) {
-        byte[] buf = string.getBytes();
+    public static String encode(byte[] buf) {
         int size = buf.length;
         char[] ar = new char[((size + 2) / 3) * 4];
         int a = 0;
@@ -50,7 +53,7 @@ public class Base64 {
      * @param base64 The Base64-encoded String.
      * @return The Base64-decoded String.
      */
-    public static String decode(String base64) {
+    public static byte[] decode(String base64) {
         int delta = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
         byte[] buffer = new byte[base64.length() * 3 / 4 - delta];
         int mask = 0xFF;
@@ -60,16 +63,16 @@ public class Base64 {
             int c1 = toInt[base64.charAt(i + 1)];
             buffer[index++] = (byte) (((c0 << 2) | (c1 >> 4)) & mask);
             if (index >= buffer.length) {
-                return new String(buffer);
+                return (buffer);
             }
             int c2 = toInt[base64.charAt(i + 2)];
             buffer[index++] = (byte) (((c1 << 4) | (c2 >> 2)) & mask);
             if (index >= buffer.length) {
-                return new String(buffer);
+                return (buffer);
             }
             int c3 = toInt[base64.charAt(i + 3)];
             buffer[index++] = (byte) (((c2 << 6) | c3) & mask);
         }
-        return new String(buffer);
+        return (buffer);
     }
 }

@@ -31,6 +31,8 @@ public class BinTreeNodeReader {
                 _leng = 0;
             }
         }
+        
+        
         if (input != null) {
             append(input, leng);
         }
@@ -45,12 +47,14 @@ public class BinTreeNodeReader {
 //                    ("Incomplete Message! ("
 //                    + stanzaSize + ", " + _leng + ")"),
 //                    this.input);
+            //Whait for more data :D
             return null;
         }
         this.readInt24();
         if (((stanzaFlag & 8) == 8) && (getKey() != null)) {
             int t = 0;
             byte[] decoded = _key.decode(this.input, 0, stanzaSize);
+            //System.out.println("Stanza: " + stanzaSize + " decoded: " + decoded.length + " total size: " + _leng);
             for (int i = 0; i < decoded.length; i++) {
                 this.input[t++] = decoded[i];
             }
@@ -125,6 +129,7 @@ public class BinTreeNodeReader {
 
     protected ProtocolNode nextTreeInternal() throws InvalidTokenException {
         ProtocolNode ret;
+        //this.readInt8();
         int token = this.readInt8();
         int size = this.readListSize(token);
 
@@ -177,7 +182,8 @@ public class BinTreeNodeReader {
         } else if (token == 0xf9) {
             size = this.readInt16();
         } else {
-            throw new InvalidTokenException(token);
+            //size = this.readInt8();
+            //throw new InvalidTokenException(token);
         }
 
         return size;

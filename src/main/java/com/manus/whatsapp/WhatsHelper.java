@@ -4,7 +4,14 @@
  */
 package com.manus.whatsapp;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.math.BigInteger;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.charset.Charset;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
@@ -13,6 +20,10 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.HttpResponseException;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
 
 /**
  *
@@ -46,6 +57,7 @@ public class WhatsHelper {
         }
         return out;
     }
+
     public static String getString(byte[] in) {
         String out = "";
         for (int i = 0; i < in.length; i++) {
@@ -67,7 +79,9 @@ public class WhatsHelper {
 
     public static byte[] deriveKey(byte[] password, byte[] salt, int iterationCount, int dkLen)
             throws java.security.NoSuchAlgorithmException, java.security.InvalidKeyException {
-        if(password == null) return null;
+        if (password == null) {
+            return null;
+        }
         SecretKeySpec keyspec = new SecretKeySpec(password, "Hmacsha1");
         Mac prf = Mac.getInstance("Hmacsha1");
         prf.init(keyspec);
@@ -79,7 +93,6 @@ public class WhatsHelper {
         //       code vs. the RFC.
         //
         // dklen is expressed in bytes. (16 for a 128-bit key)
-
         int hLen = prf.getMacLength();   // 20 for SHA1
         int l = Math.max(dkLen, hLen); //  1 for 128bit (16-byte) keys
         int r = dkLen - (l - 1) * hLen;      // 16 for 128bit (16-byte) keys
@@ -125,5 +138,72 @@ public class WhatsHelper {
         dest[offset + 1] = (byte) (i / (256 * 256));
         dest[offset + 2] = (byte) (i / (256));
         dest[offset + 3] = (byte) (i);
+    }
+    public static String md5(String s) {
+        MessageDigest m = null;
+        try {
+            m = MessageDigest.getInstance("MD5");
+        } catch (NoSuchAlgorithmException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+        m.reset();
+        m.update(s.getBytes());
+        byte[] digest = m.digest();
+        BigInteger bigInt = new BigInteger(1, digest);
+        String hashtext = bigInt.toString(16);
+        while (hashtext.length() < 32) {
+            hashtext = "0" + hashtext;
+        }
+        return hashtext;
+    }
+    // HTTP GET request
+    public static String http_get(String uri) {
+        try {
+            URL obj = new URL(uri);
+            HttpURLConnection con = (HttpURLConnection) obj.openConnection();
+            
+            // optional default is GET
+            con.setRequestMethod("GET");
+            con.setRequestProperty("User-Agent", Constants.WHATSAPP_USER_AGENT);
+            con.setRequestProperty("Accept", "text/json");
+            int responseCode = con.getResponseCode();
+            
+            BufferedReader in = new BufferedReader(
+                    new InputStreamReader(con.getInputStream()));
+            String inputLine;
+            StringBuffer response = new StringBuffer();
+            
+            while ((inputLine = in.readLine()) != null) {
+                response.append(inputLine);
+            }
+            in.close();
+            return response.toString();
+        } catch (MalformedURLException ex) {
+            Logger.getLogger(WhatsHelper.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (IOException ex) {
+            Logger.getLogger(WhatsHelper.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return null;
+
+    }
+    
+    static String sha1(byte[] input) {
+        try {
+            MessageDigest mDigest = MessageDigest.getInstance("SHA1");
+            byte[] result = mDigest.digest(input);
+            StringBuffer sb = new StringBuffer();
+            for (int i = 0; i < result.length; i++) {
+                sb.append(Integer.toString((result[i] & 0xff) + 0x100, 16).substring(1));
+            }
+            
+            return sb.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            Logger.getLogger(WhatsHelper.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return "";
+    }
+    static String sha1(String input) {
+        return sha1(input.getBytes());
     }
 }
